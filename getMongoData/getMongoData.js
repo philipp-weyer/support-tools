@@ -263,7 +263,12 @@ function printInfo(message, command, section, printCapture, commandParameters) {
 function printServerInfo() {
     section = "server_info";
     printInfo('Shell version',      version, section);
-    printInfo('Shell hostname',     hostname, section);
+    // hostname() function not supported in mongosh, only in legacy mode
+    try {
+      printInfo('Shell version', function(){return db.hostInfo().system.hostname}, section);
+    } catch {
+      printInfo('Shell hostname',     hostname, section);
+    }
     printInfo('db',                 function(){return db.getName()}, section);
     printInfo('Server status info', function(){return db.serverStatus()}, section);
     printInfo('Host info',          function(){return db.hostInfo()}, section);
@@ -277,14 +282,34 @@ function printReplicaSetInfo() {
     printInfo('Replica set config', function(){return rs.conf()}, section);
     printInfo('Replica status',     function(){return rs.status()}, section);
     printInfo('Replica info',       function(){return db.getReplicationInfo()}, section);
-    printInfo('Replica slave info', function(){return db.printSlaveReplicationInfo()}, section, true);
+    printInfo('Replica slave info', function(){
+      // printSlaveReplicationInfo deprecated in 4.4.1
+      try {
+        return db.printSecondaryReplicationInfo()
+      } catch {
+        return db.printSlaveReplicationInfo()
+      }
+    }, section, true);
 }
 
 function printUserAuthInfo() {
   section = "user_auth_info";
   db = db.getSiblingDB('admin');
-  printInfo('Database user count', function(){return db.system.users.count()}, section);
-  printInfo('Custom role count', function(){return db.system.roles.count()}, section);
+  // Warning being logged in data for mongo/mongosh with compatibility > 4.0
+  printInfo('Database user count', function(){
+    try {
+      db.system.users.countDocuments()
+    } catch {
+      db.system.users.count()
+    }
+  }, section);
+  printInfo('Custom role count', function(){
+    try {
+      db.system.roles.countDocuments()
+    } catch (e) {
+      db.system.roles.count()
+    }
+  }, section);
 }
 
 function updateDataInfoAsIncomplete(isMongoS) {
@@ -353,6 +378,10 @@ function printDataInfo(isMongoS) {
                               function(){return db.getSiblingDB(mydb.name).getCollection(col).getIndexes()}, section, false, {"db": mydb.name, "collection": col});
                     printInfo('Index Stats',
                               function(){
+                                // $indexStats not supported for timeseries
+                                // collections > 5.0 and views. Therefore
+                                // simply skipping those
+                                try {
                                 var res = db.getSiblingDB(mydb.name).runCommand( {
                                   aggregate: col,
                                   pipeline: [
@@ -377,6 +406,10 @@ function printDataInfo(isMongoS) {
                                 }
 
                                 return res;
+                                } catch (e) {
+                                  process.stderr.write('Warning: ' + e.message + '\n');
+                                  process.stderr.write('Continuing\n')
+                                }
                               }, section);
                 });
             }
@@ -436,7 +469,15 @@ if (! _printJSON) {
     print("getMongoData.js version " + _version);
     print("================================");
 }
-var _host = hostname();
+
+// hostname() function not supported in mongosh
+var _host = '';
+
+try {
+  _host = db.hostInfo().system.hostname;
+} catch {
+  _host = hostname();
+}
 
 try {
     printServerInfo();
