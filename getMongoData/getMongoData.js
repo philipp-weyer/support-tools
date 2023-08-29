@@ -421,17 +421,28 @@ function printShardOrReplicaSetInfo() {
     section = "shard_or_replicaset_info";
     printInfo('isMaster', function(){return db.isMaster()}, section);
     var state;
-    var stateInfo = rs.status();
-    if (stateInfo.ok) {
+    // standalone mongodbs that aren't configured as rs throw an error on
+    // rs.status()
+    try {
+      var stateInfo = rs.status();
+      if (stateInfo.ok) {
         stateInfo.members.forEach( function( member ) { if ( member.self ) { state = member.stateStr; } } );
         if ( !state ) state = stateInfo.myState;
-    } else {
+      } else {
         var info = stateInfo.info;
         if ( info && info.length < 20 ) {
-            state = info; // "mongos", "configsvr"
+          state = info; // "mongos", "configsvr"
         }
         if ( ! state ) state = "standalone";
+      }
+    } catch(e) {
+      if (e.codeName == 'NoReplicationEnabled') {
+        state = 'standalone';
+      } else {
+        throw(e);
+      }
     }
+
     if (! _printJSON) print("\n** Connected to " + state);
     if (state == "mongos") {
         printShardInfo();
